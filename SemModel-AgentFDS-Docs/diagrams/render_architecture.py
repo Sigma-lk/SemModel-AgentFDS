@@ -140,9 +140,9 @@ def main():
         arrow([(cx, 1790), (cx, 1985)], both=True)
         label(cx, 1890, s)
 
-    text(1500, 2330, 'Ops-Agent 总体架构图', 35)
-    im.save(OUT / 'ops-agent-architecture.png', dpi=(180, 180))
-    print(OUT / 'ops-agent-architecture.png')
+    text(1500, 2330, 'SemModel-AgentFDS 总体架构图', 35)
+    im.save(OUT / 'semmodel-agentfds-architecture.png', dpi=(180, 180))
+    print(OUT / 'semmodel-agentfds-architecture.png')
 
 
 if __name__ == "__main__":

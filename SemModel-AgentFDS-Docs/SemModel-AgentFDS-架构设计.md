@@ -1,24 +1,24 @@
-# 基于语义建模的Agent故障诊断系统设计与实现 架构设计
+# 基于语义建模的Agent故障诊断系统设计与实现架构设计
 
 ## 0. 摘要
 
 本系统面向中小型应用的运维诊断场景，构建以大语言模型 Agent 为核心的故障诊断系统设计与实现，提供业务与资源管理、日志和指标采集查询、拓扑展示、自然语言交互及故障辅助诊断功能。借鉴 [UModel 论文](https://arxiv.org/abs/2606.04799) 的对象中心建模思想，将用户定义的业务系统、业务流程与客户端发现的应用、服务实例、主机、依赖资源及配置关联，建立实体、依赖关系与观测数据之间的统一语义映射，使 Agent 能沿拓扑收集证据，定位疑似故障根因，并输出可追溯的诊断报告和处理建议。
 
-参考UModel开源地址：/Users/sigma/Documents/ChatGPT/UnifiedModel-main
+参考 UModel 开源仓库：[alibaba/UnifiedModel](https://github.com/alibaba/UnifiedModel)
 
 官网的描述：https://help.aliyun.com/zh/cms/cloudmonitor-2-0/overview/?spm=a2c4g.11186623.help-menu-28572.d_2_0.7c704bc2Sz66jM
 
 验收场景如下：
 
-./验收场景1.md
+[验收场景 1](../验收场景1.md)
 
-./验收场景2.md
+[验收场景 2](../验收场景2.md)
 
 ## 1. 架构图与技术栈
 
 ### 1.1 总体设计与技术路线
 
-Ops-Agent 采用前后端分离架构，以统一对象模型连接业务拓扑和观测数据，以统一查询入口支撑人工查询和 Agent 调查，形成“采集发现 → 模型与观测存储 → 查询取证 → 故障诊断 → 手册审核发布 → 后续复用”的闭环。
+SemModel-AgentFDS 采用前后端分离架构，以统一对象模型连接业务拓扑和观测数据，以统一查询入口支撑人工查询和 Agent 调查，形成“采集发现 → 模型与观测存储 → 查询取证 → 故障诊断 → 手册审核发布 → 后续复用”的闭环。
 
 平台后端统一使用 **Python + FastAPI**，前端使用 **TypeScript + Vue 3**。基础数据设施采用 **PostgreSQL（PG）、Elasticsearch（ES）和 Prometheus**；按后文章节要求，同时引入 **Neo4j** 保存拓扑图数据，使用 **LangChain / LangGraph** 实现 Agent 运行与检查点，使用 **OpenTelemetry（OTel）** 接入应用观测。Trace 方案确定为 **Jaeger v2 + Elasticsearch**：OTel 负责应用侧采集，Jaeger 负责 Trace 接收、存储访问、查询和可视化，ES 作为其持久化后端。平台 Python 服务通过 Jaeger 写入与查询适配器接入，保留统一对象模型及 inspectOps 查询入口。
 
@@ -26,7 +26,7 @@ Ops-Agent 采用前后端分离架构，以统一对象模型连接业务拓扑�
 
 ### 1.2 总体架构图
 
-![Ops-Agent 总体架构概览](diagrams/ops-agent-architecture.png)
+![SemModel-AgentFDS 总体架构概览](diagrams/semmodel-agentfds-architecture.png)
 
 上图复用项目已有的总体架构概览。图中“模型管理层”的观测数据表示数据集、数据源及绑定等管理视角，实际观测正文由独立观测接入模块写入对应存储；“执行引擎与存储适配”汇总了底层访问职责，读取执行器与写入适配器分别实现。Agent 实际运行在服务端。下图进一步展开应用侧接入、Agent 工作器、读写路径、Trace 存储和知识发布流程。
 
@@ -955,7 +955,7 @@ Trace 与实体的两种绑定粒度，以及它们的端点约束，统一在 2
 | 配置实体及使用、变更关系 | PostgreSQL 保存唯一当前记录；需要拓扑表达或图查询的数据也在 Neo4j 中存储一份，并同步写入，更新覆盖旧值 |
 | 各版本配置正文及解析后的键值 | 由配置快照的 DataSourceBinding 指定实际存储，可采用关系数据库或对象存储；按固定快照标识保留观测历史 |
 | 实例加载证据及运行时参数 | 对应事件或日志存储，保留实例引用、内容版本及观测时间；不作为模型当前属性的历史副本 |
-| 原始配置文件或配置中心内容 | 仍由原应用或配置中心管理；Ops-Agent 保存用于调查的快照，不承担配置发布职责 |
+| 原始配置文件或配置中心内容 | 仍由原应用或配置中心管理；SemModel-AgentFDS 保存用于调查的快照，不承担配置发布职责 |
 
 快照来源和实际保存位置通过 2.8 节的 DataSourceBinding 定位，数据源类型和地址由 2.7 节定义；数据源、数据集和绑定的模型记录统一以 PostgreSQL 为主存储。快照正文保存在绑定指定的观测存储，不要求复制到 Neo4j。
 
@@ -3313,11 +3313,11 @@ walkBindings 的结构化 nodeFilter/edgeFilter 使用第 5.3.2 节的编译规�
 
 | 本地实现 | 可以确认的行为 |
 | --- | --- |
-| [planrender.Renderer](/Users/sigma/Documents/ChatGPT/UnifiedModel-main/internal/query/planrender/planrender.go:1) | 按查询族及方法选择编译器，Render 不连接真实后端 |
-| [Prometheus 生成](/Users/sigma/Documents/ChatGPT/UnifiedModel-main/internal/query/executor.go:1221) | 取指标 generator 或名称，结合实体和过滤生成 label matchers，再修改表达式 |
-| [ES 生成](/Users/sigma/Documents/ChatGPT/UnifiedModel-main/internal/query/executor.go:1523) | 程序化组装 JSON 查询、索引、过滤、排序和输出字段 |
-| [SQL 生成](/Users/sigma/Documents/ChatGPT/UnifiedModel-main/internal/query/sql_renderer.go:1) | 从约束、字段配置、指标及聚合声明生成 SQL；当前该 Renderer 输出 ClickHouse 方言 |
-| [Constraint](/Users/sigma/Documents/ChatGPT/UnifiedModel-main/internal/query/constraints.go:1) | 用独立于方言的约束描述过滤，供不同编译器使用；当前结构不等于支持任意复杂表达式 |
+| [planrender.Renderer](https://github.com/alibaba/UnifiedModel/blob/main/internal/query/planrender/planrender.go#L1) | 按查询族及方法选择编译器，Render 不连接真实后端 |
+| [Prometheus 生成](https://github.com/alibaba/UnifiedModel/blob/main/internal/query/executor.go#L1221) | 取指标 generator 或名称，结合实体和过滤生成 label matchers，再修改表达式 |
+| [ES 生成](https://github.com/alibaba/UnifiedModel/blob/main/internal/query/executor.go#L1523) | 程序化组装 JSON 查询、索引、过滤、排序和输出字段 |
+| [SQL 生成](https://github.com/alibaba/UnifiedModel/blob/main/internal/query/sql_renderer.go#L1) | 从约束、字段配置、指标及聚合声明生成 SQL；当前该 Renderer 输出 ClickHouse 方言 |
+| [Constraint](https://github.com/alibaba/UnifiedModel/blob/main/internal/query/constraints.go#L1) | 用独立于方言的约束描述过滤，供不同编译器使用；当前结构不等于支持任意复杂表达式 |
 
 参考实现是“元数据驱动的动态组合，并允许局部指标表达式”，不能概括成完整查询模板换变量，也不能概括成不需要任何语义声明就能自动推导任意查询。上述观测生成路径没有调用 LLM 编写语句。
 
@@ -3793,16 +3793,16 @@ Agent 管理 API 的错误结构为 `{code,message,retryable,details,correlation
 #### 7.2.1 工作台布局
 
 ```text
-┌──────────────┬──────────────────────────────────────────────────────────┐
-│ Ops-Agent  ‹ │ 面包屑 / 页面标题             环境 · 时区 · 当前用户      │
-│              ├──────────────────────────────────────────────────────────┤
-│ 首页         │ 页面说明 / 范围提示                          主要操作     │
-│ 模型管理   ▸ │ 筛选栏 / 局部时间窗口 / 搜索                              │
-│ 运维手册   ▸ ├──────────────────────────────────────────────────────────┤
-│ 数据查询     │                                                          │
-│ Agent      ▸ │ 内容区：看板 / 列表 / 编辑器 / 对话 / 图                   │
-│              │                                     详情抽屉（按需打开） │
-└──────────────┴──────────────────────────────────────────────────────────┘
+┌──────────────────────┬──────────────────────────────────────────────────────────┐
+│ SemModel-AgentFDS  ‹ │ 面包屑 / 页面标题             环境 · 时区 · 当前用户      │
+│                      ├──────────────────────────────────────────────────────────┤
+│ 首页                 │ 页面说明 / 范围提示                          主要操作     │
+│ 模型管理   ▸         │ 筛选栏 / 局部时间窗口 / 搜索                              │
+│ 运维手册   ▸         ├──────────────────────────────────────────────────────────┤
+│ 数据查询             │                                                          │
+│ Agent      ▸         │ 内容区：看板 / 列表 / 编辑器 / 对话 / 图                   │
+│                      │                                     详情抽屉（按需打开） │
+└──────────────────────┴──────────────────────────────────────────────────────────┘
 ```
 
 全局菜单侧栏宽 224px，默认展开，可收起为 64px 图标栏；顶栏高 56px，内容区边距 24px。二级菜单默认全部收起，点击所属一级菜单再展开；直接访问二级路由时只展开当前分组，确保当前位置可见。侧栏总开关偏好保存在当前浏览器，首次进入仍按默认展开；菜单折叠不关闭页面或运行任务。图标态提供名称提示及可点击的子菜单浮层，键盘也可展开。
