@@ -2,7 +2,7 @@
 
 ## 0. 摘要
 
-本系统面向中小型应用的运维诊断场景，构建以大语言模型 Agent 为核心的故障诊断系统设计与实现，提供业务与资源管理、日志和指标采集查询、拓扑展示、自然语言交互及故障辅助诊断功能。借鉴 [UModel 论文](https://arxiv.org/abs/2606.04799) 的对象中心建模思想，将用户定义的业务系统、业务流程与客户端发现的应用、服务实例、主机、依赖资源及配置关联，建立实体、依赖关系与观测数据之间的统一语义映射，使 Agent 能沿拓扑收集证据，定位疑似故障根因，并输出可追溯的诊断报告和处理建议。
+本系统面向中小型应用的运维诊断场景，构建以大语言模型 Agent 为核心的故障诊断系统设计与实现，提供业务与资源管理、日志和指标采集查询、拓扑展示、自然语言交互及故障辅助诊断功能。借鉴 [UModel 论文](https://arxiv.org/abs/2606.04799) 的对象中心建模思想，将用户定义的业务系统、业务流程与客户端发现的应用、服务实例、主机、基础设施服务及配置关联，建立实体、依赖关系与观测数据之间的统一语义映射，使 Agent 能沿拓扑收集证据，定位疑似故障根因，并输出可追溯的诊断报告和处理建议。
 
 参考 UModel 开源仓库：[alibaba/UnifiedModel](https://github.com/alibaba/UnifiedModel)
 
@@ -152,7 +152,7 @@ flowchart TB
 
 OTel/OTLP 的应用接入边界止于本机客户端；客户端转换后向平台发送项目协议。按第 3 章方案，平台观测入口不要求部署 OTel Collector，也不直接接收应用的 OTLP。平台存储写入适配器仍需按照后端协议编码数据；Trace 路径为“应用 OTel → 本机客户端 → 平台项目 JSON 接口 → Jaeger OTLP 接口 → ES”，查询路径为“inspectOps → Jaeger 查询适配器 → Jaeger → ES”。
 
-Jaeger 查询使用正式的 v3 gRPC 或 HTTP API，具体调用方式在适配实现时锁定；不依赖界面内部查询端点。search 的过滤、排序、分页等逐项按 Jaeger 实际能力声明，不把通用 ES 查询能力直接等同于 Jaeger 能力。[Jaeger API](https://www.jaegertracing.io/docs/latest/architecture/apis/)
+首版 Trace 查询固定采用 **Jaeger v3 HTTP API**，设计基线锁定 Jaeger **2.23.0** 及其依赖的 jaeger-idl **0.14.0**；这表示实现与验收目标，不表示仓库已经部署或验证该版本。Python 查询适配器使用受控 HTTP 客户端访问查询端点，不依赖 UI 内部接口。search/readTrace 的模型声明、请求编译与结果处理分别见第 2.7.4、2.8.8、4.6.3、5.9 节。版本升级须重跑能力与协议验收，不凭“v2”版本族名称假定能力相同。[Jaeger API](https://www.jaegertracing.io/docs/2.23/architecture/apis/)、[版本依赖依据](https://github.com/jaegertracing/jaeger/blob/v2.23.0/go.mod)
 
 Trace 写入确认沿用第 3.4.7 节：Jaeger 到 ES 采用同步写入配置，接收处理链须等待存储结果，避免在内存接受后提前向平台确认。适配器核对 OTLP 响应中的部分成功和错误，未取得足够写入依据时按项目契约返回失败或结果待确认。[Jaeger 写入确认](https://www.jaegertracing.io/docs/latest/deployment/delivery-guarantees/)
 
@@ -185,14 +185,14 @@ PG 的几类用途可以共用实例，但需隔离库/schema、凭据和连接�
 | Web 工作台 | Vue 3 构建的静态资源 | 通过 HTTP API 与 SSE 访问平台，不持有数据库或模型供应商凭据 |
 | Python API 服务 | 模型管理、观测接入、统一查询、Agent API、内容和审核发布模块 | 初期按模块组织，可共用服务进程；模型操作和观测接入按各自同步契约返回 |
 | Python 后台工作器 | Agent 运行、会话提炼、调度与失联回收 | 使用 PG 任务表、租约和心跳；任务受理不等于执行完成，首版不依赖额外消息队列 |
-| Jaeger 服务 | Jaeger v2 可执行程序，首版单进程承载接收与查询角色，连接 ES | 作为独立主机进程部署；验证与 ES 的版本兼容、同步写入确认、正式查询 API 及索引保留策略 |
+| Jaeger 服务 | Jaeger 2.23.0 可执行程序，每个隔离范围内首版单进程承载接收与查询角色，连接 ES | 作为独立主机进程部署；按第 2.7.4、5.9 节验证范围隔离、ES 兼容、同步写入确认、v3 HTTP 查询及保留策略 |
 | 数据设施 | PG、Neo4j、ES、Prometheus 及持久卷 | 配置持久化、权限和保留策略，分别验证写入确认与查询可见性 |
 | 被管理主机 | 常驻客户端、业务进程及其应用采集包 | 首版验收采用同主机、同网络命名空间，通过回环地址接入本机客户端 |
 | 模型服务 | 服务端配置的 ChatModel 供应商接口 | 验证工具调用、结构化输出、流式取消和 usage 返回，记录调用预算和错误 |
 
 首版完整验收覆盖对象与拓扑、指标、日志、Trace、已接入事件、Agent 调查轨迹、展示产物及 Runbook 审核复用。采集可以按第 3.8 节分阶段启用，但两份验收场景要求的 Metrics、Logs、Traces 必须完成端到端接入。Go 应用包、配置快照、配置加载及业务专属证据、对象存储和其他 SQL 方言保留扩展位；Redis、Kafka、Celery、向量数据库不列为当前必需依赖。
 
-验收商城仍采用 Java Spring Boot / HikariCP 与 MySQL 业务依赖，MySQL 在平台模型中表示为 ResourceService，不改变平台采用 PostgreSQL 的选型，也不意味着首版 SQL 观测执行器支持 MySQL。Jaeger 使用官方可执行程序部署，Python 后端通过协议对接，无需把 Jaeger 作为 Python 库嵌入。[Jaeger 下载](https://www.jaegertracing.io/download/)
+验收商城仍采用 Java Spring Boot / HikariCP 与 MySQL 业务依赖，MySQL 在平台模型中表示为 InfrastructureService，不改变平台采用 PostgreSQL 的选型，也不意味着首版 SQL 观测执行器支持 MySQL。Jaeger 使用官方可执行程序部署，Python 后端通过协议对接，无需把 Jaeger 作为 Python 库嵌入。[Jaeger 下载](https://www.jaegertracing.io/download/)
 
 依赖版本及运行配置在实现阶段锁定并记录，避免以未验证的框架或后端能力代替本项目的支持清单。
 
@@ -201,7 +201,7 @@ PG 的几类用途可以共用实例，但需隔离库/schema、凭据和连接�
 | 架构图或设计 | 所在章节 | 说明 |
 | --- | --- | --- |
 | 元数据总体架构图 | [2.2.1 元数据总体架构](#221-元数据总体架构) | 四类 Node、四类 Binding 及模型定义之间的连接 |
-| 实体关系图 | [2.4 实体绑定](#24-实体绑定-entitybinding) | 业务、应用、实例、主机和依赖资源等对象关系 |
+| 实体关系图 | [2.4 实体绑定](#24-实体绑定-entitybinding) | 业务、应用、实例、主机和基础设施服务等对象关系 |
 | 数据访问关联图 | [2.8.4 查询能力与适用范围](#284-查询能力与适用范围) | 从模型与绑定找到可执行的观测访问路径 |
 | 连接器数据流图 | [3.2.4 客户端组件与数据流](#324-客户端组件与数据流客户端各组件) | 应用、本机客户端、模型接口与观测接口的协作 |
 | 查询执行路由图 | [5.1 执行类别与路由](#51-执行类别与路由) | 模型、图和观测读取的规划、编译、校验与执行 |
@@ -249,7 +249,7 @@ flowchart LR
 | 诊断手册 `Runbook`      | 定义针对一类问题如何收集和验证证据         | 2.9  |
 | 数据源定义 `DataSource`  | 定义平台从哪里读取调查数据             | 2.7  |
 
-被调查业务依赖的数据库属于 `ResourceService` 实体类型；平台读取指标或日志所用的数据源属于 `DataSource`。二者分别承担业务拓扑与数据接入的职责，可以指向同一套物理设施，但不自动视为同一个对象。
+被调查业务依赖的数据库属于 `InfrastructureService` 实体类型；平台读取指标或日志所用的数据源属于 `DataSource`。二者分别承担业务拓扑与数据接入的职责，可以指向同一套物理设施，但不自动视为同一个对象。
 
 #### 2.2.3 绑定 `Binding`：定义模型之间的关联
 
@@ -364,7 +364,7 @@ automaker、game 或 supplier：业务场景对象
 
 **同一模型种类下的不同规格**
 
-对于 `EntityType`，建模者在 `spec.fields` 中声明该类型自己的业务字段。字段结构由具体类型定义决定，不由 domain 或 `EntityType` 这个种类名称统一固定。同一个 domain 内的服务、主机和依赖资源可以使用不同字段；不同 domain 内的同名类型也可以各自声明字段。
+对于 `EntityType`，建模者在 `spec.fields` 中声明该类型自己的业务字段。字段结构由具体类型定义决定，不由 domain 或 `EntityType` 这个种类名称统一固定。同一个 domain 内的服务、主机和基础设施服务可以使用不同字段；不同 domain 内的同名类型也可以各自声明字段。
 
 下面三份定义都属于 `EntityType`，但具有不同的 `spec.fields`。字段示例对应 2.3 节的属性，具体英文名称仅用于说明结构：
 
@@ -372,7 +372,7 @@ automaker、game 或 supplier：业务场景对象
 |--------------------------|--------------------------------------------------------------------|-------------------------------------------------------------------------------|
 | 服务实例 `ServiceInstance`   | `runtime_id: string`、`artifact_version: string`、`endpoint: string` | `runtime_id=stock-02`、`artifact_version=v2.1`、`endpoint=http://stock-02:8080` |
 | 主机 `Host`                | `asset_id: string`、`hostname: string`、`os: string`                 | `asset_id=host-01`、`hostname=worker-01`、`os=Linux`                            |
-| 依赖资源服务 `ResourceService` | `resource_id: string`、`resource_type: string`、`endpoint: string`   | `resource_id=stock-db`、`resource_type=mysql`、`endpoint=stock-db:3306`         |
+| 基础设施服务 `InfrastructureService` | `resource_id: string`、`resource_type: string`、`endpoint: string`   | `resource_id=stock-db`、`resource_type=mysql`、`endpoint=stock-db:3306`         |
 
 自定义发生在类型建模阶段，具体实例按引用的定义填写属性值，不为每个实例重新声明结构。修改 `resource_type` 的值不会自动切换字段结构。若新增业务属性，应更新类型定义的版本，并按 2.12 节的接口约定校验和写入。
 
@@ -436,7 +436,7 @@ automaker、game 或 supplier：业务场景对象
 
 #### 2.3.3 应用 `Application`
 
-**存在意义：** 表示实现业务能力的软件单元，为调用关系、依赖资源、日志及指标提供稳定的逻辑归属。扩缩容、重启或滚动发布时，应用身份持续存在，使 Agent 可以先判断整个应用的情况，再下钻到具体实例。
+**存在意义：** 表示实现业务能力的软件单元，为调用关系、基础设施依赖以及日志和指标提供稳定的逻辑归属。扩缩容、重启或滚动发布时，应用身份持续存在，使 Agent 可以先判断整个应用的情况，再下钻到具体实例。
 
 **类型边界：** 应用描述软件职责和技术背景；一次运行的启动时间、制品版本和运行时版本属于 `ServiceInstance`。业务系统可以包含多个应用，应用也可以参与多个业务流程。
 
@@ -495,11 +495,11 @@ automaker、game 或 supplier：业务场景对象
 
 主机 `host-01` 的主机名为 `worker-01`，操作系统为 Linux，规格为 8 核、16 GiB 内存，承载库存实例 `stock-02`。查询其 CPU 使用率需经数据绑定读取指标，不能从 8 核这一规格直接判断是否存在瓶颈。
 
-#### 2.3.6 依赖资源服务 `ResourceService`
+#### 2.3.6 基础设施服务 `InfrastructureService`
 
-**存在意义：** 表示应用访问的数据库、缓存、消息服务等逻辑依赖，让 Agent 能从应用继续调查数据与中间件服务。此类资源可能由托管平台提供，即使没有其内部主机和进程信息，也需要作为独立依赖节点查询。
+**存在意义：** 表示应用依赖的数据库、缓存、消息队列等基础设施服务，以逻辑服务为建模粒度，让 Agent 能从应用继续调查数据存储与中间件服务。此类资源可能由托管平台提供，即使没有其内部主机和进程信息，也需要作为独立依赖节点查询。
 
-**类型边界：** 它表达业务使用的资源服务，`Host` 表达承载机器，`Application` 表达业务软件能力。平台用来读取调查数据的 `DataSource` 属于元数据定义；即使连接同一套数据库，也与业务依赖资源分开登记。
+**类型边界：** 它表达业务使用的基础设施服务，`Host` 表达承载机器，`Application` 表达业务软件能力。平台用来读取调查数据的 `DataSource` 属于元数据定义；即使连接同一套数据库，也与业务使用的基础设施服务分开登记。
 
 | 特有字段                 | 类型     | 必填 | 含义与约束                                          |
 |----------------------|--------|----|------------------------------------------------|
@@ -638,7 +638,7 @@ flowchart LR
     A -->|CALLS| D
     D -->|HAS_INSTANCE| I[服务实例]
     I -->|RUNS_ON| H[主机]
-    D -->|DEPENDS_ON| R[依赖资源服务]
+    D -->|DEPENDS_ON| R[基础设施服务]
     X[变更记录] -->|CHANGES| D
     D -->|USES_CONFIG| C[配置]
     I -->|USES_CONFIG| C
@@ -699,7 +699,7 @@ flowchart LR
 
 **存在意义与查询方向：** 从实例查宿主机，或从异常主机反查其承载的实例，用于核查共享计算资源问题。
 
-**语义边界：** 表达实际运行位置，不表示通过网络访问某台机器，也不表示资源服务的内部部署。首版只记录直接可识别的物理机或虚拟机承载，不用该关系表示容器层级或虚拟机与物理机的嵌套。跨主机有多个副本时，应登记多个实例。
+**语义边界：** 表达实际运行位置，不表示通过网络访问某台机器，也不表示基础设施服务的内部部署。首版只记录直接可识别的物理机或虚拟机承载，不用该关系表示容器层级或虚拟机与物理机的嵌套。跨主机有多个副本时，应登记多个实例。
 
 **关系属性：** 首版无专有必填属性，承载位置由发现证据确定。同一次运行确实迁移主机时替换当前承载关系，不保存旧拓扑；迁移时间线由日志或事件提供；若迁移过程产生了新进程或容器运行，则按新实例建模。无法确认切换时刻时保留时间缺失，不制造精确迁移时间。
 
@@ -709,7 +709,7 @@ flowchart LR
 
 #### 2.4.5 依赖 `DEPENDS_ON`
 
-**连接范围与基数：** 业务流程 → 应用；应用 → 依赖资源服务。两组均允许多对多。
+**连接范围与基数：** 业务流程 → 应用；应用 → 基础设施服务。两组均允许多对多。
 
 **存在意义与查询方向：** 从流程查参与实现它的应用，从应用查数据库、缓存或消息服务；反向可查某个应用支撑哪些流程、某个资源被哪些应用依赖。
 
@@ -725,7 +725,7 @@ flowchart LR
 
 #### 2.4.6 变更目标 `CHANGES`
 
-**连接范围与基数：** 变更记录 → 应用/服务实例/依赖资源服务/配置。允许多对多，一次变更可以涉及多个目标，同一目标可以经历多次变更。
+**连接范围与基数：** 变更记录 → 应用/服务实例/基础设施服务/配置。允许多对多，一次变更可以涉及多个目标，同一目标可以经历多次变更。
 
 **存在意义与查询方向：** 从变更查操作目标，或从异常对象反查相关变更，支持核对异常前后的版本和状态。
 
@@ -793,7 +793,7 @@ flowchart LR
 
 **必须慎重使用：** 此关系会影响对象去重、拓扑探索和证据归属，一条错误全同关系可能把不同对象的异常混到一起。只有身份已经核实后才能写入正式关系；名称相似、同 IP/端口、同主机、同版本、配置内容相同或模型给出的高置信度，都不能单独作为建立依据。证据不足时保留两个对象，将候选对应及待核验依据留在调查记录中，不写入 `SAME_AS`。
 
-以下情况不属于全同：应用与其运行实例、实例与承载主机、数据库服务与其宿主机、同一应用的两个副本、同名副本重启前后的两次运行、测试与生产对象、同内容但来源独立的两份配置。业务资源 `ResourceService` 与数据源定义 `DataSource` 即使指向同一物理设施，也不能用此关系连接，因为后者不是实体对象。
+以下情况不属于全同：应用与其运行实例、实例与承载主机、数据库服务与其宿主机、同一应用的两个副本、同名副本重启前后的两次运行、测试与生产对象、同内容但来源独立的两份配置。基础设施服务实体 `InfrastructureService` 与数据源定义 `DataSource` 即使指向同一物理设施，也不能用此关系连接，因为后者不是实体对象。
 
 全同在逻辑上具有对称性和传递性，但实现时不能未经核验就将关系链批量写成新的直接事实，更不能据此自动合并或删除对象、覆盖属性、改写原始引用。首版保留原对象与原证据，查询可以展示直接全同对象；需要沿全同链探索时，须保留完整路径，核查各边的证据、时间适用性及整体身份是否冲突。传递得到的对应必须标为推导结果，不伪装成直接核验事实，也不自动继承其他关系的端点许可。
 
@@ -831,7 +831,7 @@ flowchart LR
 | 链路 `TraceDataset` | 一条分布式调用链中的 Trace 或 Span 记录 | 还原请求跨应用的调用路径和上下文；不等同于应用间静态 `CALLS` 关系，也不直接证明业务失败 |
 | 配置快照 `ConfigurationSnapshotDataset` | 一份配置在某次采集时取得的内容状态 | 回查版本和比较内容；不证明实例已加载或参数已生效 |
 
-DatasetSpec 的结构约束及具体数据集记录统一保存在 PostgreSQL；实际指标点、日志、事件、Trace/Span 和配置快照属于观测记录，按类型和 DataSourceBinding 指向的实际存储保存并保留时间信息。例如指标进入 Prometheus、日志进入 Elasticsearch；其余类别由接入方案确定，不能统一写入 Neo4j。具体数据集记录可以标识 host-01-metrics 属于 host-01，但不包含每次 CPU 采样值。
+DatasetSpec 的结构约束及具体数据集记录统一保存在 PostgreSQL；实际指标点、日志、事件、Trace/Span 和配置快照属于观测记录，按类型和 DataSourceBinding 指向的实际存储保存并保留时间信息。例如指标进入 Prometheus、日志进入 Elasticsearch、Trace 经 Jaeger 存入 Elasticsearch；事件及扩展类别按已登记接入方案保存，不能统一写入 Neo4j。具体数据集记录可以标识 host-01-metrics 属于 host-01，但不包含每次 CPU 采样值。
 
 各类定义均须声明记录字段、对象身份维度、时间字段及可用查询操作。`spec.query_operations` 中的名称统一采用第 4.6 节 `readObservations` 的 `operation.kind`，参数结构与语义由第 4 章统一定义；数据集只声明适用的操作子集及字段、类型、函数等约束，不另设操作别名或请求结构，能力声明规则见第 2.8.4 节。具体对象映射由 `DataBinding` 负责，物理存储位置由 `DataSourceBinding` 和 `DataSource` 负责。源端发生时间、采集时间、入库时间和生效时间不能混用，缺失时明确标注。一个物理存储可承载多个逻辑数据集，同一业务事实也可留下多种观测，但不能将它们当成多次独立发生。
 
@@ -883,7 +883,7 @@ DatasetSpec 的结构约束及具体数据集记录统一保存在 PostgreSQL；
 
 **分类边界：** TraceDataset 保存调用过程的观测记录，不是实体拓扑。静态的“订单应用可以调用库存应用”仍由 `EntityBinding(CALLS)` 表达；Trace 只说明在特定时间窗内实际观测到某次调用或调用链。Trace 也不是指标：调用次数、错误率、延迟分位数等聚合结果属于 `MetricDataset`；Trace 可以作为这些指标的原始或关联证据，但不能把每个 Span 直接当成一次业务失败。Trace 还不是日志：Span 事件或异常信息可以带有日志式字段，但独立输出的程序日志仍属于 `LogDataset`。
 
-**定义内容：** 数据集字段、Trace 标识字段 `trace_id_field`、Span 标识字段 `span_id_field`、父 Span 标识字段 `parent_span_id_field` 以及追踪协议 `protocol`。默认字段名分别为 `traceId`、`spanId`、`parentSpanId`，默认协议为 `opentelemetry`；这些默认值可以被存储系统实际字段名覆盖。协议字段说明数据格式和上下文约定，不代表平台已经实现该协议的全部查询或传播能力。
+**定义内容：** 数据集字段、Trace 标识字段 `trace_id_field`、Span 标识字段 `span_id_field`、父 Span 标识字段 `parent_span_id_field` 以及追踪协议 `protocol`。默认字段名分别为 `traceId`、`spanId`、`parentSpanId`，默认协议为 `opentelemetry`；这些配置指向数据集的逻辑字段名，后端实际字段和协议结构由 DataSourceBinding 映射，不因更换后端而要求 Agent 改用物理字段名。协议字段说明数据格式和上下文约定，不代表平台已经实现该协议的全部查询或传播能力。
 
 建议的 `TraceDataset.spec` 形状如下：
 
@@ -910,9 +910,18 @@ spec:
       required: true
     - name: endTime
       type: datetime
-      required: false
+      required: true
     - name: serviceName
       type: string
+      required: true
+    - name: instanceId
+      type: string
+      required: true
+    - name: environment
+      type: string
+      required: true
+    - name: durationNs
+      type: int64
       required: true
     - name: spanName
       type: string
@@ -930,7 +939,7 @@ spec:
     - readTrace
 ```
 
-上例中的 `record_fields` 描述记录结构，不能与 `trace_id_field` 等识别配置混为一谈：前者说明字段及类型，后者说明哪些字段承担 Trace 关系语义。`startTime` 是 Span 开始时间；若数据集同时提供结束时间，执行器可以计算持续时间，但不能用采集时间替代发生时间。
+上例中的 `record_fields` 描述记录结构，不能与 `trace_id_field` 等识别配置混为一谈：前者说明字段及类型，后者说明哪些字段承担 Trace 关系语义。`startTime` 是 Span 开始时间；本例面向已结束的 Span，endTime 必填，durationNs 按结束时间减开始时间计算并声明纳秒单位，不能用采集时间替代发生时间。其他 Trace 数据集可将结束时间与耗时均声明为可选，但不能对缺失耗时补零。
 
 **查询和关联规则：** `search` 按对象身份、服务名、Span 名称、状态和绝对时间窗筛选 Span；`readTrace` 按 `traceId` 和有界时间范围读取授权范围内的链路。上例声明这两种操作，实际可执行性仍须按第 2.8.4 节与绑定、适配器及权限取交集。仅提供实例局部 Span 检索的数据集可以只声明 `search`；支持按 traceId 过滤并不自动具备完整链路读取能力。`readTrace` 的记录关联、权限范围转换与完整性要求遵循第 4.6.3 节，不能沿用源实例或错误状态过滤而丢掉其他关联 Span。结果应保留原始 Trace/Span 标识、父子关系、服务身份、时间范围、状态、来源及截断信息；当父 Span 或上下游 Span 不在查询结果或存储保留期内时，返回不完整链路说明，不凭空补齐拓扑。跨服务查询可使用传播的 `trace_id` 或显式的调用方/被调用方字段，但字段映射必须由 `DataBinding` 或 `DataSourceBinding` 声明，不能由 Agent 猜字段名。
 
@@ -1100,7 +1109,7 @@ MetricDataset -> TraceDataset
 
 公共内容：数据源标识、存储类型、适用环境、访问地址、可选的数据库或租户范围、认证配置引用、连接选项及定义版本。不同存储类型定义各自适用的字段，认证凭据通过引用交给下游解析，不在模型中保存明文。一个数据源可供多个数据集复用，具体表、索引及指标定位规则由存储关联定义。
 
-`ResourceService` 表示被调查业务依赖的数据库等资源，`DataSource` 表示平台从哪里读取调查数据。二者可以指向同一套物理设施，但分别承担业务拓扑与数据接入的职责，不自动视为同一个对象。数据源定义也不指定平台自身的模型存储实现。
+`InfrastructureService` 表示被调查业务依赖的数据库、缓存、消息队列等基础设施服务，`DataSource` 表示平台从哪里读取调查数据。二者可以指向同一套物理设施，但分别承担业务拓扑与数据接入的职责，不自动视为同一个对象。数据源定义也不指定平台自身的模型存储实现。
 
 #### 2.7.1 PostgreSQL 观测数据源
 
@@ -1126,11 +1135,44 @@ MetricDataset -> TraceDataset
 
 `runtime-metrics-prod`：类型为 Prometheus，端点为 `https://metrics.ops.internal`，API 路径为 `/api/v1`，用于访问实例及线程池等运行指标。
 
+#### 2.7.4 Jaeger Trace 数据源
+
+Jaeger 数据源表示平台访问的 Trace 查询服务。首版使用 `jaeger-v3-http` 适配配置，查询端点通常为 16686 端口上的 `/api/v3`；实际地址由服务端配置确定。OTLP 写入端点由独立 ObservationWriteProfile 引用，不能用查询地址替代写入地址。
+
+以下为本项目拟定的 DataSource.spec 示例，字段是平台配置契约，不是 Jaeger 原生配置：
+
+```yaml
+kind: DataSource
+metadata:
+  domain: mall
+  id: trace-store-prod
+  version: v1
+spec:
+  type: jaeger
+  environment: prod
+  endpoint: https://jaeger-query-prod.ops.internal
+  api_path: /api/v3
+  protocol: http-json
+  server_version: 2.23.0
+  credential_ref: mall-prod-trace-reader
+  connection_options:
+    timeout_ms: 10000
+    verify_tls: true
+  capability_profile: jaeger-2.23-es-span-v1
+  access_scope_ref: mall-prod-traces
+```
+
+`capability_profile` 引用服务端维护的适配器能力与验收记录，覆盖后端、功能开关、字段级过滤、排序、分页和协议版本；管理员填写该名称不能直接使能力变成可执行。配置上线前须确认实际版本，启用所需结构化过滤功能（基线版本的 `jaeger.query.structuredFilters`），并验证所连接 ES 后端的能力。能力探测结果与适配器已验收白名单取交集，无法确认的能力关闭；连接、后端或功能配置变更使旧验收依据失效。
+
+`access_scope_ref` 引用可信部署范围。首版完整链路读取采用**每个租户/环境独立的 Jaeger 查询访问范围**：由独立查询部署及其 ES 只读凭据/索引范围隔离，或由已经验收的等价服务端隔离实现。平台可复用同一 ES 集群，但 Jaeger 自身配置必须保证该端点无法读到其他范围的数据。仅在模型中填写 environment 或仅给 Span 加环境属性不构成隔离。没有该保证时不能公开 readTrace；服务级受限用户也不能通过完整链路关联扩大权限，见第 5.9.3 节。
+
+ES 地址、索引前缀、模板、保留策略及存储凭据放在 Jaeger 的部署配置中，由 Jaeger 管理。平台 DataSource 不携带 ES 索引作为 Jaeger API 参数。部署范围及 capability_profile 是服务端配置引用，不增加新的元模型种类。
+
 以上是首版可表达的外部来源类型，不要求一次实现全部驱动。源系统使用对象存储提供配置内容时，可按相同方式扩展接入类型；观测正文的存储按类型及绑定确定，模型主存储及图数据存储规则见 2.12.5 节。
 
 ### 2.8 数据源绑定 `DataSourceBinding`
 
-将一个 `DatasetSpec` 连接到一个已登记的 `DataSource`，声明逻辑数据集与物理观测存储之间的访问关联。数据集、数据源和绑定记录统一以 PostgreSQL 为主存储，需要拓扑表达或图查询的数据也在 Neo4j 中存储一份，并同步写入；实际日志、指标等观测正文留在各自存储。绑定包含数据集及数据源引用、存储定位、逻辑字段到物理字段的映射、支持的查询操作、适用环境或时间范围。定位可以是 PostgreSQL 的 schema/表、Elasticsearch 索引、Prometheus 指标及标签，或对象存储位置。具体驱动、采集与查询执行由后续章节实现。
+将一个 `DatasetSpec` 连接到一个已登记的 `DataSource`，声明逻辑数据集与物理观测存储之间的访问关联。数据集、数据源和绑定记录统一以 PostgreSQL 为主存储，需要拓扑表达或图查询的数据也在 Neo4j 中存储一份，并同步写入；实际日志、指标等观测正文留在各自存储。绑定包含数据集及数据源引用、存储定位、逻辑字段到物理字段的映射、支持的查询操作、适用环境或时间范围。定位可以是 PostgreSQL 的 schema/表、Elasticsearch 日志索引、Prometheus 指标及标签、Jaeger 查询协议及访问范围，或对象存储位置。具体驱动、采集与查询执行由后续章节实现。
 
 数据绑定负责“对象、关系事实或数据集记录的身份与关联字段 → 目标数据集逻辑字段”，存储关联负责“数据集逻辑字段 → 物理存储字段”。例如实例标识先映射为逻辑字段 `instance_id`，再映射为 Elasticsearch 中的 `service.instance.id`。二者分工明确，避免将存储字段写进实体定义。
 
@@ -1270,37 +1312,46 @@ flowchart LR
 
 #### 2.8.8 链路追踪存储关联
 
-将 `TraceDataset` 连接到 Trace 存储，描述 Trace/Span 的物理定位、字段路径和查询能力。该分类只负责读取 Trace/Span 记录，不负责定义 `trace_id`、`span_id`、`parent_span_id` 的业务语义（属于 `TraceDataset`），不负责声明应用间的 `CALLS`（属于 `EntityBinding`），也不负责决定某条 Span 是否证明业务失败。
+首版将 TraceDataset 关联到第 2.7.4 节的 Jaeger 数据源。ES 是 Jaeger 的实际存储；平台绑定描述 **Jaeger API 的访问与返回字段**，不直接定位 Jaeger 内部 ES 索引。平台 ES DSL 执行器不承接 Trace 查询。
 
-典型映射如下：
+以下是 DataSourceBinding.spec 示例，目标数据集采用第 2.5.4 节的逻辑字段。`request` 是已注册的字段选择器标识，`response` 是适配器可解析的类型化路径描述；它们不是可执行脚本或任意 JSONPath。该扩展与普通字符串字段映射一样，由模型校验器和适配器注册表共同校验。location.access_scope_ref 必须与目标 DataSource 的可信范围一致，不能在绑定中覆盖或扩大范围。
 
 ```yaml
 src:
   kind: DatasetSpec
   domain: mall
-  id: order-call-traces
+  id: service-call-traces
 dest:
   kind: DataSource
   domain: mall
   id: trace-store-prod
 location:
-  index: otel-spans-*
+  adapter: jaeger-v3-http
+  access_scope_ref: mall-prod-traces
 field_mapping:
-  trace_id: trace_id
-  span_id: span_id
-  parent_span_id: parent_span_id
-  start_time: start_time
-  service_name: service.name
-  span_name: name
-  status: status.code
+  traceId: {request: span.traceID, response: span.traceId}
+  spanId: {request: span.spanID, response: span.spanId}
+  parentSpanId: {response: span.parentSpanId}
+  startTime: {request: span.startTime, response: span.startTimeUnixNano}
+  endTime: {response: span.endTimeUnixNano}
+  durationNs: {request: span.duration, response: span.endTimeUnixNano-minus-startTimeUnixNano}
+  serviceName: {request: resource.service, response: "resource.attributes[service.name]"}
+  instanceId: {request: resource.attribute.service.instance.id, response: "resource.attributes[service.instance.id]"}
+  environment: {request: resource.attribute.deployment.environment.name, response: "resource.attributes[deployment.environment.name]"}
+  spanName: {request: span.name, response: span.name}
+  status: {request: span.status, response: span.status.code}
 query_operations:
   - search
   - readTrace
 ```
 
-上例中的 `query_operations` 是绑定 spec 内的能力声明，沿用第 2.8.4 节规则。`search` 对应 Span 检索；`readTrace` 只有在声明的链路关联、授权范围转换及后端完整读取能力均满足第 4.6.3 节时才可执行。索引或 trace_id 字段存在本身不证明具备 readTrace 能力；仅能读取实例局部 Span 的绑定不得宣称支持完整链路读取。
+时间戳转换、纳秒耗时及状态转换由数据集语义和注册的类型转换规则确定，查询层解析后写入计划；上述差值路径只允许注册的纳秒差值运算。`status` 的逻辑值为 `UNSET/OK/ERROR`，不是 HTTP 状态码；适配器将条件值转换为查询 API 接受的状态常量。字段可返回不等于可过滤；ID、属性层级、状态及时间的筛选能力均按第 5.9.1 节收窄。
 
-Trace 存储关联可以把逻辑 `trace_id`、服务身份、时间范围和状态条件转换到具体索引、列或属性路径；它不能因为发现两个 Span 的服务名不同，就自动登记 `CALLS`，也不能因为 Span 状态为错误，就直接生成业务失败结论。父 Span、子 Span 或调用方/被调用方字段缺失时，执行结果应标记链路不完整，不能由绑定补造。
+本例要求接入时保留 `service.name`、`service.instance.id` 和 `deployment.environment.name` Resource 属性。`ObjectRef.id` 与实例属性不必相同，实体到逻辑 `instanceId` 的映射仍由 DataBinding 定义。字段缺失时报告映射或数据质量问题，不猜测另一个属性，也不把 span 属性与同名 resource 属性混为一谈。
+
+同一底层存储可支撑两种具体数据集：实例局部 Span 数据集与环境内授权完整链路数据集。前者的 DataBinding 以 `runtime_id -> instanceId` 限定对象；后者使用单独的 DatasetSpec→DatasetSpec 关联，以源记录的 `traceId -> traceId` 为关联键、以可信租户/环境范围为约束，`query_grain` 为 trace，不携带源实例或错误状态过滤。只有完整链路关联、隔离范围及调用者权限均满足时才允许 readTrace；不能只在此处声明操作名就取得跨服务访问权。
+
+结果身份解析继续使用 DataBinding 的 result_identity_mapping，将每个 Span 的原始环境、服务及实例身份映射为可确认的 ObjectRef；无法解析时保留原始身份及原因。链路关联不创建 CALLS 关系，也不把错误 Span 自动判定为业务失败。
 
 #### 2.8.9 事件存储关联
 
@@ -1519,7 +1570,7 @@ status 为 created、updated、deleted、unchanged 或 failed。所有模型变�
 
 **高级图查询。** 已确定在基础结构化能力之外增加 queryGraph，外层仍使用 inspectOps 的统一 JSON。params 必填 environment、operation，可选 states、temporal；operation 为 `{kind:"cypher",languageVersion:"ops.cypher/v1",text,parameters}`。Agent 使用模型声明的逻辑类型、关系、字段和完整 ObjectRef 参数；图模型映射负责转换物理标签、字段及身份值，不能要求 Agent 掌握 Neo4j 内部 ID。基础 walkBindings 保留用于邻居探索，复杂查询无需强制拆成多次一跳请求。
 
-查询层将文本解析为 AST，按允许的语法子集校验整条请求，并校验类型、关系端点、权限、时间和预算；不支持的语法整体拒绝，不裁剪片段后继续执行。查询层交付已绑定 AST 与不可移除约束；外部执行层的图引擎负责将约束落实到正确匹配位置，物理编译为参数化原生 Neo4j 查询并在一个只读图事务内执行；查询层归一化结果后返回。禁止原文透传、全工作空间内存解释、写入、任意过程/代码、无界路径和跨数据源查询。OPTIONAL MATCH 无合法右侧结果时保留左侧行；所有匹配筛选先于聚合。该能力不恢复通用 pipeline，不开放原始 SQL/PromQL/ES DSL；语法、参数与预算以本文第 4.4.6 节为准，执行及验收要求见第 5.8.1、5.9.1 节。
+查询层将文本解析为 AST，按允许的语法子集校验整条请求，并校验类型、关系端点、权限、时间和预算；不支持的语法整体拒绝，不裁剪片段后继续执行。查询层交付已绑定 AST 与不可移除约束；外部执行层的图引擎负责将约束落实到正确匹配位置，物理编译为参数化原生 Neo4j 查询并在一个只读图事务内执行；查询层归一化结果后返回。禁止原文透传、全工作空间内存解释、写入、任意过程/代码、无界路径和跨数据源查询。OPTIONAL MATCH 无合法右侧结果时保留左侧行；所有匹配筛选先于聚合。该能力不恢复通用 pipeline，不开放原始 SQL/PromQL/ES DSL；语法、参数与预算以本文第 4.4.6 节为准，执行及验收要求见第 5.8.1、5.10.1 节。
 
 对象和图查询默认包含所有仍保留且有权限的记录，未指定 states 时不隐式排除 expired。states 可显式选择 active 或 expired；它筛选的是当前存在状态，不表示目标时刻的历史状态。对象精确读取不因过期变为 NOT_FOUND。没有租约/存在状态的人工记录仍可读取；显式状态筛选只匹配有该状态的记录，不能给它们伪造存在证据。
 
@@ -1571,7 +1622,7 @@ contentChangedAt 与通用 revision 分开：续约可以增加 revision，但�
 | 具体模型记录 | PostgreSQL | 保存八类模型的具体定义、对象、关系、具体数据集及其所属对象、数据源和手册等完整当前信息，是模型事实的主存储 |
 | 平台运行管理数据 | PostgreSQL | 保存调查任务、证据引用、结论、接口执行记录、请求控制信息及采集规则等 |
 | 需要拓扑表达或图查询的数据 | PostgreSQL 与 Neo4j | PG 保留完整模型信息；节点、边及直接属性也在 Neo4j 中持久化存储一份，供拓扑与图查询使用 |
-| 实际观测记录 | 按类别和 DataSourceBinding 指定 | 指标可用 Prometheus、日志可用 Elasticsearch；Trace、事件及配置快照由实际接入方案确定，保留观测历史 |
+| 实际观测记录 | 按类别和 DataSourceBinding 指定 | 指标使用 Prometheus、日志使用 Elasticsearch、Trace 经 Jaeger 存入 Elasticsearch；事件及扩展配置快照按绑定接入，保留观测历史 |
 
 PG 保存完整模型信息，Neo4j 另存一份图数据。这里描述的是持久化存储职责，不是查询时临时加载、缓存或数据库主从复制。图数据对应的业务实体在两库中使用相同唯一标识；两份物理存储表示同一实体，不形成两个业务实体，也不产生历史版本。模型定义、对象和关系仍是覆盖更新，只有观测记录按时间保留历史。
 
@@ -2015,7 +2066,7 @@ DataSourceBinding 提供数据源及字段定位依据，`query_operations` 仍�
 | --- | --- | --- |
 | metric | 首版采用 Prometheus Remote Write 1.0 写入适配器，将项目记录转换为时间序列和样本；目标为已启用接收功能的 Prometheus | 对应后端请求收到成功确认，且该输入记录展开的所有样本均包含在成功请求中 |
 | log | Elasticsearch Bulk 写入适配器；按 writeMapping 生成文档和确定的目标索引，模板与字段类型在接入前配置 | Bulk 响应中对应文档项写入成功；HTTP 200 本身不能作为全部文档成功的依据 |
-| span | 使用所选 Trace 后端注册的 Span 写入适配器，保持 traceId、spanId、parentSpanId、实例身份、起止时间、状态、属性、events 和 links；具体后端选型另行确定 | 必须提供能覆盖对应 Span 的后端写入确认；仅支持异步内存接受的接口不能直接映射为 persisted |
+| span | 使用 Jaeger OTLP 写入适配器，保持 traceId、spanId、parentSpanId、实例身份、起止时间、状态、属性、events 和 links；Jaeger 负责写入 ES，写入路由独立于第 5.9 节查询适配器 | 必须提供能覆盖对应 Span 的后端写入确认；仅支持异步内存接受的接口不能直接映射为 persisted |
 | event | 对已接入的通用事件，可配置 PostgreSQL 观测表写入适配器，以参数化 INSERT 写入授权表；不使用模型表 | 相应观测事务提交成功；一次事务内失败的记录不返回成功，不影响其他已完成后端写入 |
 | configurationSnapshot | 保留写入适配器扩展位，按配置快照规格校验固定内容及引用；首版未启用 | 未接入时返回 UNSUPPORTED_OBSERVATION_KIND，不只保存引用就宣称正文已写入 |
 
@@ -2319,7 +2370,7 @@ Agent 用业务对象、逻辑字段和明确操作表达读取意图，服务�
 
 #### 4.3.2 两类图查询与模型依赖
 
-普通图查询 walkBindings 与非图查询遵循同一分工：Agent 提交结构化 JSON，查询层校验、解析模型与范围并形成逻辑计划，对应读取适配器负责物理编译、校验及读取，查询层归一化后返回。执行类别在方言路由前确定：普通模型读取使用 PG 模型读取适配器，图查询使用 Neo4j 图适配器，观测读取使用 DSL/PromQL/SQL 观测执行族；不能只因两份计划都使用 PostgreSQL 就混用入口、连接或允许访问的表。
+普通图查询 walkBindings 与非图查询遵循同一分工：Agent 提交结构化 JSON，查询层校验、解析模型与范围并形成逻辑计划，对应读取适配器负责物理编译、校验及读取，查询层归一化后返回。执行类别在方言路由前确定：普通模型读取使用 PG 模型读取适配器，图查询使用 Neo4j 图适配器，观测读取使用 DSL/PromQL/SQL 观测执行族或 Jaeger Trace 查询适配器；不能只因两份计划都使用 PostgreSQL 就混用入口、连接或允许访问的表。
 
 scanBlueprints、matchObjects、readObjectState 及 listDatasets/findRunbooks 所需的模型记录读取走 PG 模型读取路径。查询层负责定义、对象、归属与适用规则的语义解析；适配器只落实已绑定条件和读取操作，发现结果的 executeSupported 仍由查询层结合实际引擎能力及权限确定。内部模型存储 Schema 提供物理布局依据，不套用观测 DataSourceBinding，也不要求 DatasetInstanceRef 或观测时间窗。PG 模型读取适配器的输入、执行及结果契约见第 5.8.2 节。
 
@@ -2676,9 +2727,66 @@ expressions 为 `{name,expr}` 非空数组，name 在请求内唯一。expr 采�
 
 readTrace 不继承“只允许 stock-02 的 Span”作为目标身份条件，而是通过声明的关联规则转换为授权 Trace 范围及 traceId 条件；租户、环境和权限约束始终保留。若只登记了实例局部数据集而没有完整 Trace 关联，则返回局部链路能力，不假称读取完整链路。服务端验证 traceId 与源记录一致，不能用记录 A 的关联凭证读取任意 Trace B。
 
-readTrace.time 是有界搜索范围，可显式宽于故障窗口以容纳跨边界调用。返回 parentSpanId、起止时间、状态、端点、记录引用及完整性说明；父节点缺失、窗口裁剪、保留期、授权裁剪或采样缺失必须标识。预算不足返回错误，不能以一部分 Span 冒充完整链路；后端读取完整与链路采集完整分别报告。
+readTrace.time 是有界搜索范围，可显式宽于故障窗口以容纳跨边界调用。返回 parentSpanId、起止时间、状态、端点、记录引用及完整性说明；已知的父节点缺失、窗口限制、保留期或采样缺失须说明依据，原因无法确定时标记 unknown，不能从缺失父节点直接推断采样丢失。首版 Jaeger 只开放完整访问范围已获授权的 readTrace，不在取得链路后静默删除无权 Span；具体规则见第 5.9.3 节。预算不足返回错误，不能以一部分 Span 冒充完整链路；后端读取完整与链路采集完整分别报告。
 
 Span → 日志的关联由绑定明确是 traceId 还是 traceId+spanId，返回关联粒度，不能把整条 Trace 的所有日志说成某个 Span 的日志。关系上下文查询同时保留调用双方身份和必要区分字段；关联不创建实体或拓扑边。
+
+##### 4.6.3.1 首版 Trace 操作范围
+
+Jaeger 绑定首版开放 `search` 和 `readTrace`，`getRecord` 与 `aggregate` 暂不开放。第 2.8.4 节列出的 Trace 操作是候选集合；不能用 FindTraces 的数量限制当成 Span 分页，也不能对一页 Span 作完整聚合。Span 搜索返回 `resultKind=rows`，readTrace 返回 `resultKind=trace`。
+
+search 以 Span 开始时间执行左闭右开过滤。readTrace.time 则是定位该 traceId 的**后端搜索范围**，不承诺仅返回开始时间在该窗口内的 Span；为保留链路，不在返回阶段按 search 的时间谓词裁剪。响应分别记录请求窗口、后端实际搜索范围及返回 Span 时间包络，窗口之外和保留期之外是否仍存在未读 Span 在没有证据时为 unknown。
+
+本项目首版 search 固定按 `startTime desc, traceId asc, spanId asc` 排序；可省略 orderBy 或提交这组排序，不接受其他排序。过滤字段、运算符及有无稳定续页能力见第 5.9.1 节。字段选择只改变输出投影，不能移除内部权限核验、链路身份和稳定记录引用所需字段。
+
+##### 4.6.3.2 从异常实例 Span 读取完整链路
+
+以下为示例登记：prod 中 `stock-02` 的 runtime_id 为 `stock-02`，服务名为 `inventory-service`；listDatasets 返回具体数据集 `stock-02-spans`，使用第 2.5.4、2.8.8 节的结构与存储绑定。真实引用必须取自发现结果。
+
+```json
+{
+  "apiVersion": "ops.query/v1",
+  "requestId": "trace-search-001",
+  "capability": "readObservations",
+  "mode": "execute",
+  "params": {
+    "context": {"kind": "object", "ref": {"environment": "prod", "type": "ops.ServiceInstance", "id": "stock-02"}},
+    "datasetInstanceRef": {"environment": "prod", "domain": "mall", "id": "stock-02-spans"},
+    "filter": {"field": "status", "op": "eq", "value": "ERROR"},
+    "operation": {
+      "kind": "search",
+      "time": {"kind": "range", "from": "2026-11-15T20:00:00+08:00", "to": "2026-11-15T20:10:00+08:00"},
+      "fields": ["traceId", "spanId", "startTime", "durationNs", "serviceName", "instanceId", "status"],
+      "page": {"size": 20}
+    }
+  },
+  "budget": {"timeoutMs": 10000, "maxRows": 20, "maxBytes": 1048576}
+}
+```
+
+假设结果中一条记录的引用为 `record-stock-span-001`，traceId 为 `0123456789abcdef0123456789abcdef`。调用 `listDatasets`，params 为 `{"context":{"kind":"record","ref":"record-stock-span-001"},"category":"trace"}`。服务端按已登记的 Dataset→Dataset 关联返回 `mall-prod-traces` 及 `associationRef=stock-span-to-trace`，并检查当前用户是否具有完整范围的读取权限。随后调用：
+
+```json
+{
+  "apiVersion": "ops.query/v1",
+  "requestId": "trace-read-002",
+  "capability": "readObservations",
+  "mode": "execute",
+  "params": {
+    "context": {"kind": "record", "ref": "record-stock-span-001"},
+    "datasetInstanceRef": {"environment": "prod", "domain": "mall", "id": "mall-prod-traces"},
+    "associationRef": "stock-span-to-trace",
+    "operation": {
+      "kind": "readTrace",
+      "traceId": "0123456789abcdef0123456789abcdef",
+      "time": {"kind": "range", "from": "2026-11-15T19:55:00+08:00", "to": "2026-11-15T20:15:00+08:00"}
+    }
+  },
+  "budget": {"timeoutMs": 10000, "maxRows": 5000, "maxBytes": 8388608}
+}
+```
+
+源记录引用固定解析到数据源、具体数据集、traceId、spanId 和来源范围；关联不要求额外开放 getRecord。引用使用服务端存储的稳定键或签名编码，不能信任调用方自行拼装的定位信息。readTrace 的计划仅保留 traceId、授权访问范围及所选搜索窗口，不保留 `instanceId=stock-02` 或 `status=ERROR`。请求 traceId 与源记录不符时在 resolve 阶段拒绝。实例范围不能转换为完整授权范围时，发现结果只提供局部 search 能力，不返回可执行的完整链路关联。
 
 #### 4.6.4 各类数据的语义边界
 
@@ -2766,7 +2874,7 @@ explain 走同一套校验和规划，返回选了哪个数据集及绑定、为
 | 逻辑约束 | 身份、权限范围、固定及用户过滤的 AST，保留条件来源、不可移除标记及条件语言（结构化 Filter 或逻辑 Cypher） |
 | 已解析字段与转换 | 查询层确定的逻辑字段与物理字段对应、存储定位、条件值转换、必要转换表达式及执行位置、结果还原规则；覆盖过滤、投影、时间、排序、分组、聚合和身份字段，并包含当前操作所需的字段存在性/null 表示及比较能力依据 |
 | 时间与操作 | 明确操作及其适用的观测 time、指标 evaluation、latestBefore 的 at/notBefore 或模型 temporal，携带必要的时间字段、时区、边界、步长、额外预读范围、单位和结果粒度；按第 4.4.3、4.6、4.8 节区分，不统一要求时间窗 |
-| 物理读取 | 适配器类型、dialect、编译器及执行器版本、受控连接配置引用、表或索引或指标定位、受控语句/请求体与参数；观测读取另关联 dataSourceRef，认证值不进入计划 |
+| 物理读取 | 适配器类型、dialect、编译器及执行器版本、受控连接配置引用、表或索引或指标定位，或 Jaeger API 方法与访问范围、受控语句/请求体与参数；观测读取另关联 dataSourceRef，认证值不进入计划 |
 | 执行约束 | 整体 deadline、剩余超时、记录/系列/采样/字节预算、可落实的扫描成本限制、排序、分页和取消规则；没有实现的预算不能假装已受后端约束 |
 | 结果契约 | 预期类型、逻辑字段、单位、身份解析及结果质量要求，以及按操作契约确定的输出选择、完整性要求和超限处理 |
 
@@ -2804,6 +2912,27 @@ explain 走同一套校验和规划，返回选了哪个数据集及绑定、为
 查询层借助模型层提供的模型信息，解析对象身份及所有引用字段，确定物理字段、存储定位、条件转换和结果还原规则。本例的观测关联与存储声明来自已选绑定；引擎接收的是这些声明的解析结果，使用确定的字段与条件编译 ES 查询体，不自行解释绑定。映射缺失、转换规则不完整或绑定有歧义时，交付引擎前就应停止。
 
 交付物是带模型依据、明确读取语义和预算的已绑定逻辑计划，不要求查询层同时生成物理请求。引擎如何将此例编译为 ES DSL、落实稳定分页并提供协议解码结果，见第 5.3.1、5.4.1～5.4.2 节。
+
+#### 4.7.6 Trace 请求的已绑定逻辑计划
+
+第 4.6.3.2 节 search 请求由查询层形成以下计划摘要。所有范围和字段均已解析，下游不再读取原始模型猜测映射：
+
+```text
+执行类别：观测读取；适配器 jaeger-v3-http；操作 search；粒度 span
+来源：stock-02-spans / trace-store-prod，以及所用定义、绑定和 revision
+可信范围：mall-prod-traces；连接配置由服务端解析，不能由请求覆盖
+系统条件：resource.service = inventory-service
+          AND resource.attribute.service.instance.id = stock-02
+          AND resource.attribute.deployment.environment.name = prod
+用户条件：span.status = error（逻辑 ERROR 的已声明转换）
+时间：Span startTime >= 2026-11-15T12:00:00Z 且 < 2026-11-15T12:10:00Z
+排序：startTime desc, traceID asc, spanID asc；页大小 20
+输出：逻辑字段、对象/固定记录引用；内部保留权限与身份核验字段
+转换：响应时间戳保留纳秒精度；durationNs 为 end-start；状态归一化
+执行约束：整次剩余 deadline、maxRows、maxBytes、能力配置版本及游标依据
+```
+
+同一示例的 readTrace 计划使用 record 关联解析得到的 traceId，目标改为 `mall-prod-traces`，搜索窗口为 `11:55:00Z—12:15:00Z`；授权依据是完整访问范围，不携带实例和错误状态条件，也没有公共分页。计划显式记录 `timeSemantics=trace_lookup`、完整响应读取要求和来源记录，防止编译器误套 Span 检索谓词。Jaeger HTTP 请求及响应映射见第 5.9 节。
 
 ### 4.8 时间、并发和一致性
 
@@ -2902,14 +3031,14 @@ queryGraph 还须对同一匹配行的多分支模式检查共同时间候选交
 | 部分 | 约定 |
 | --- | --- |
 | data | 明确 columns/字段 Schema、逻辑值、单位、对象与固定记录引用；trace 保留父子标识，diff 保留两个输入引用，timeseries 保留表达式名、维度和求值时刻 |
-| page | returned、hasMore、nextCursor（仅确实支持时）；无游标且截断时明确不可续页 |
-| quality | executionComplete、truncated、requestedRange、实际读取/求值范围、缺失及 warnings；观测另有 observationCoverage=complete/partial/unknown，模型时间筛选另有 modelScope、temporalCompleteness、filterBasis，不混淆执行完成与数据完整 |
+| page | returned、hasMore、nextCursor（仅确实支持时）；hasMore=true/false 表示已知存在/不存在后续结果，null 表示无法确定；无游标且截断时明确不可续页 |
+| quality | executionComplete、truncated、requestedRange、实际读取/求值范围、缺失及 warnings；Trace 的 backendReadComplete、traceCompleteness 和 missingParentSpanIds 见第 5.9.4 节；观测另有 observationCoverage=complete/partial/unknown，模型时间筛选另有 modelScope、temporalCompleteness、filterBasis，不混淆执行完成与数据完整 |
 | provenance | 使用的对象、数据集、绑定、修订、执行记录、实际时间与操作；脱敏计划及编译器版本可追溯 |
 | error | code、stage、message、retryable、details；stage=validate/resolve/compile/execute/decode；details 给出字段路径和原因，不要求 AI 解析错误文案 |
 
 needs_selection 只返回候选引用及差异，不混入已执行观测数据。静态结构错误使用 INVALID_REQUEST，语义不支持用 UNSUPPORTED_OPERATION，映射缺失用 MAPPING_INCOMPLETE，绑定多解用 AMBIGUOUS_BINDING，质量不足不能假装为空成功。保留 MODEL_CHANGED、QUERY_BUDGET_EXCEEDED 等错误。
 
-返回空数据只说明合法查询没有取得记录。观测覆盖未知、记录丢失与业务确实未发生不能合并成“对象正常”。后端不能证明采集完整时，observationCoverage 必须为 unknown 或 partial，并说明依据。指标聚合超预算按第 4.4.3 节报错，不能将不完整结果包装为正常截断。
+返回空数据只说明合法查询没有取得记录。观测覆盖未知、记录丢失与业务确实未发生不能合并成“对象正常”。后端不能证明采集完整时，observationCoverage 必须为 unknown 或 partial，并说明依据。search 的正常分页不等于执行失败；当后端不保证完整搜索或稳定续页时，返回 truncated=true 和明确的不可续页说明，hasMore 可为 null。指标聚合超预算按第 4.4.3 节报错，不能将不完整结果包装为正常截断。
 
 调用追踪采用跨 API 的统一日志封装，覆盖 Agent 调用的查询、模型管理及其他工具 API，不由查询层另建专用执行记录管理。每次调用记录调用标识、Agent/调查关联、工具及 API 名称、输入、开始/结束时间、耗时、成功/候选/失败状态、错误及实际返回数据；校验拒绝、超时、取消也要记录。重试作为独立调用或子尝试关联，不能覆盖先前失败。
 
@@ -2951,7 +3080,7 @@ needs_selection 只返回候选引用及差异，不混入已执行观测数据�
 
 ### 5.1 执行类别与路由
 
-按第 4.3.2 节先区分模型、图和观测读取，再选择适配器。观测注册表按 `(执行族, 方言, 操作, 后端能力)` 路由：DSL 首版为 Elasticsearch Query DSL，PromQL 为声明兼容的 Prometheus 查询接口，SQL 首版仅适配 PostgreSQL。未接入方言返回 UNSUPPORTED_DIALECT，不自动回退到 PostgreSQL；模型读取也不能因缺少路由而回退到观测 SQL 入口。
+按第 4.3.2 节先区分模型、图和观测读取，再选择适配器。观测注册表按 `(执行族, 方言, 操作, 后端能力)` 路由：DSL 首版为 Elasticsearch Query DSL，PromQL 为声明兼容的 Prometheus 查询接口，SQL 首版仅适配 PostgreSQL；Trace 使用独立的 Jaeger v3 HTTP 适配器。Trace 数据源即使底层使用 ES，也不能路由到 DSL 执行器。未接入方言返回 UNSUPPORTED_DIALECT，不自动回退到 PostgreSQL；模型读取也不能因缺少路由而回退到观测 SQL 入口。
 
 ```mermaid
 flowchart TD
@@ -2964,11 +3093,13 @@ flowchart TD
     D --> E[DSL 编译器]
     D --> F[PromQL 编译器]
     D --> G[SQL 观测方言编译器：首版 PG]
+    D --> T[Jaeger v3 HTTP 请求编译器]
     P --> H[最终计划校验]
     Q --> H
     E --> H
     F --> H
     G --> H
+    T --> H
     H --> I{execute / explain}
     I -->|execute| J[同步连接、取数、解码及资源释放]
     I -->|explain| K[脱敏物理计划]
@@ -2983,7 +3114,7 @@ PG 模型读取与 PG 观测读取可复用 SQL AST、PostgreSQL 解析器/生�
 
 #### 5.2.1 接收已绑定计划
 
-引擎接收第 4.7.4 节的 boundLogicalPlan 及模型修订依据，不另定义公共 JSON 输入，也不要求查询层预先生成 SQL、PromQL、DSL 或物理 Cypher。模型、图、观测计划的字段按执行类别适用；具体适配器输入见第 5.8 节。
+引擎接收第 4.7.4 节的 boundLogicalPlan 及模型修订依据，不另定义公共 JSON 输入，也不要求查询层预先生成 SQL、PromQL、DSL 或物理 Cypher。模型、图、观测计划的字段按执行类别适用；模型适配器输入见第 5.8 节，Jaeger 查询适配器见第 5.9 节。
 
 认证上下文来自服务端；查询层确定已授权的存储定位及连接配置引用，执行器仅通过受控配置取得 endpoint 与认证。执行请求不能另带任意地址、表或索引覆盖它们。模型 revision 变化时按第 4.8 节重新规划或报错，不由引擎静默改选数据源。
 
@@ -3305,9 +3436,156 @@ walkBindings 的结构化 nodeFilter/edgeFilter 使用第 5.3.2 节的编译规�
 
 **返回与元数据读取。** 按第 5.7.3 节返回 EngineResult，查询层还原模型定义或逻辑对象并封装响应。规划所需定义、绑定及修订通过同一存储访问层的内部元数据读取接口取得；接口范围受服务端控制，可复用连接与解码组件，不递归调用 inspectOps，也不要求先提供正在解析的观测绑定。explain 可取得规划元数据，但不执行目标模型结果读取。
 
-### 5.9 实现与验收
+### 5.9 Jaeger Trace 查询适配器
 
-#### 5.9.1 参考实现依据
+本适配器消费第 4.7.6 节的已绑定计划，使用 Python HTTP 客户端调用第 2.7.4 节确定的 v3 HTTP API。它负责请求编译、物理校验、连接、流式读取和协议解码；查询层继续负责逻辑字段、单位、ObjectRef/RecordRef 及公共质量字段的归一化。服务端共用连接池，凭据从 credential_ref 解析；不允许 Agent 指定 URL、请求头或后端查询体。
+
+#### 5.9.1 操作映射与能力边界
+
+| 平台操作 | 首版物理调用 | 能力边界 |
+| --- | --- | --- |
+| search | `POST /api/v3/spans`（FindSpans） | 检索匹配的 Span；支持经验证的字段/条件子集和固定排序；分页须有实际后端依据 |
+| readTrace | `GET /api/v3/traces/{traceId}`（GetTrace） | 在授权访问范围内按 ID 读取；无实例/状态过滤、无公共分页；完整读取成功后返回 trace |
+| getRecord | 首版不开放 | 不将搜索首条结果冒充固定记录读取；RecordRef 仍可作为关联上下文 |
+| aggregate | 首版不开放 | 不遍历有限搜索样本后计算全局计数、分组或分位数 |
+
+`FindTraces` 返回包含匹配 Span 的链路，不能替代这里的 Span 搜索；本适配器不采用该回退路径。Jaeger 公共协议包含某字段并不证明当前 ES 后端及功能配置支持它。实现应按锁定 IDL 构造请求，并用已验收能力配置约束字段、操作及组合。[锁定的 QueryService 定义](https://github.com/jaegertracing/jaeger-idl/blob/v0.14.0/proto/api_v3/query_service.proto)
+
+首版 `search` 的平台支持子集如下；只对这组子集实施编译，不自动继承第 4 章所有 Filter 能力：
+
+- 组合仅开放 `all`。serviceName、instanceId、environment、spanName、status 只开放 `eq`；durationNs 开放 `eq/gt/ge/lt/le`。开始时间由 operation.time 传入，ID 首版用于输出和 readTrace 定位，不另开放任意 ID 搜索。
+- serviceName 编译为 resource 层内置 service 字段；instanceId/environment 编译为明确 resource 层的属性；spanName/status/durationNs 编译为 span 层内置字段。后端不能区分属性层级时拒绝，不降级为任意层同名属性匹配。关系绑定若需要 caller/callee 等未开放过滤，返回不可执行，不能忽略其中一端。
+- durationNs 的条件使用第 4.4.2 节的 int64 标记值，编译成与该纳秒值精确相等的后端时长字面值；status 的 `UNSET/OK/ERROR` 分别转换为查询常量 `unset/ok/error`。不存在或 null 的字段不因适配而变成匹配。`ne/not/any/in/contains/textMatch/exists/isNull` 和任意扩展属性筛选本版不开放，后续逐项验证语义后再增加。
+- 排序固定为 `startTime desc, traceID asc, spanID asc`。物理请求采用已验证的默认排序并在公共响应回显；不能在已取的一页数据上重排来伪装另一种全局排序。若部署不满足该顺序及稳定区分规则，search 不标记可执行。
+- 投影只对返回数据裁列，必须先完成所有必要条件、权限与身份核验；Resource 和 Span 属性解码不能混层。未映射、未接入或语义不可等价实现的参数在 compile 前拒绝。
+
+能力配置必须验证 `FindSpans`、结构化过滤开关、字段层级和同一 Span 上条件的 AND 语义、默认排序，以及 ES 后端续页能力。可用时通过 `/api/v3/capabilities` 取得后端声明，结合协议测试建立能力记录；接口不存在、声明不完整或与实测不符时不推测支持。RFC 说明结构化过滤的设计和层级语义，不作为所有后端已经实现的证明。[HTTP 接口定义](https://github.com/jaegertracing/jaeger-idl/blob/main/swagger/api_v3/query_service.openapi.yaml)、[结构化过滤设计](https://github.com/jaegertracing/jaeger/blob/main/docs/rfc/0005-structured-query-filters.md)
+
+#### 5.9.2 search 的请求编译与实际调用
+
+compile 将计划中的系统条件与用户条件构成 AND 表达式，按已绑定字段生成 Jaeger 的结构化 Call；系统条件来源保留在内部计划中。时间转换为 UTC RFC 3339，精度保持不变。请求字段由固定协议模型序列化，不能把 Agent 的逻辑字段名直接放进后端。
+
+第 4.7.6 节示例编译为以下 HTTP 请求。地址由数据源解析；Authorization 等认证头由连接配置注入，示例省略。该请求使用结构化 filter，不混入 FindTraces 的 serviceName/attributes/searchDepth 等另一组参数。
+
+```http
+POST /api/v3/spans HTTP/1.1
+Host: jaeger-query-prod.ops.internal
+Content-Type: application/json
+Accept: application/json
+```
+
+```json
+{
+  "query": {
+    "startTimeMin": "2026-11-15T12:00:00Z",
+    "startTimeMax": "2026-11-15T12:10:00Z",
+    "filter": {
+      "op": "and",
+      "args": [
+        {"call": {"op": "eq", "args": [{"field": {"level": "resource", "name": "service"}}, {"scalar": {"value": "inventory-service"}}]}},
+        {"call": {"op": "eq", "args": [{"attr": {"level": "resource", "key": "service.instance.id"}}, {"scalar": {"value": "stock-02"}}]}},
+        {"call": {"op": "eq", "args": [{"attr": {"level": "resource", "key": "deployment.environment.name"}}, {"scalar": {"value": "prod"}}]}},
+        {"call": {"op": "eq", "args": [{"field": {"level": "span", "name": "status"}}, {"scalar": {"value": "error"}}]}}
+      ]
+    },
+    "pagination": {"pageSize": 20}
+  }
+}
+```
+
+validate 检查路径/方法来自固定允许列表、访问范围与源一致、系统条件均出现在最终请求、时间边界及页大小正确，且当前 capability_profile 支持这些字段组合。缺少映射返回 MAPPING_INCOMPLETE，能力不足返回 UNSUPPORTED_OPERATION；模型修订变化沿用 MODEL_CHANGED。compile/validate 不连接目标观测源，explain 只展示脱敏请求、范围落实方式及能力依据。
+
+execute 使用剩余 deadline 发起请求并消费该页的所有响应块。FindSpans 每块的 `result.spans` 承载 OTLP TracesData，页的续页 token 只在完整读取最终块后判定；不能把中间块的空 token 当成最后一页。收到块内 error、解码失败、连接中断或预算超限时，本次调用失败，不返回前半页成功。
+
+平台 cursor 封装后端不透明 token，绑定认证范围、规范化请求摘要、排序、数据集/绑定修订、能力版本及有效期；不解析、修改后端 token。只有已验证后端稳定续页时，才返回 nextCursor，并通过后续 `query.pagination.pageToken` 原样续取。无续页保证的部署只提供单页检索：不返回 cursor，quality.truncated=true，page.hasMore=null 表示未知；不能因空 token 断言结果已经穷尽。稳定顺序也不等于历史快照，分页视图的一致性依据必须在 provenance 中说明。
+
+省略 page 时默认 size=20，服务端上限设为 100；请求超过上限返回 INVALID_REQUEST，page.size 大于有效 maxRows 返回 QUERY_BUDGET_EXCEEDED，不静默截小。后端若限制为更小页，返回实际数量和真实续页状态。稳定分页的验收须包含重复时间戳、并发写入及 token 失效；无法满足第 4.4.3 节约定时退为明确不可续页的单页能力。
+
+#### 5.9.3 readTrace 的范围校验与调用
+
+GetTrace 请求只提供 Trace 定位信息，不能靠附加任意 filter 落实平台租户和服务授权。因此在编译前完成两项检查：源 RecordRef 与 traceId/数据源范围一致；调用者有权读取该 access_scope_ref 下可能返回的全部服务 Span。首版使用第 2.7.4 节的隔离部署保证底层访问范围，权限较窄的用户只能 search 自己有权查看的 Span。若完整范围未授权或部署隔离无法证明，返回 SCOPE_VIOLATION，不先读全链路再隐藏部分 Span。
+
+第 4.6.3.2 节 readTrace 请求的物理调用如下；实际代码用 HTTP 客户端的参数编码器构造 URL：
+
+```http
+GET /api/v3/traces/0123456789abcdef0123456789abcdef?startTime=2026-11-15T11%3A55%3A00Z&endTime=2026-11-15T12%3A15%3A00Z&rawTraces=true HTTP/1.1
+Host: jaeger-query-prod.ops.internal
+Accept: application/json
+```
+
+`rawTraces=true` 固定为首版证据读取策略，要求返回存储中的时间信息，避免时钟校正后的值被误认为原始观测。开始/结束参数用于后端定位，不等同于 search 的逐 Span 裁剪；不得在请求中加入源实例或 ERROR 条件，也不按返回 Span 的时间再删节点。
+
+执行器完整读取所有 `result` 块，核对返回 traceId、可信来源范围和可用的环境身份。若返回其他 traceId 或发现跨范围数据，整次调用以 SCOPE_VIOLATION 失败并记录部署异常；这属于隔离失效检测，不是替代后端隔离的授权方案。traceId 合法但未找到时返回 NOT_FOUND；不得把超时或无权读取转换成空链路。
+
+readTrace 不分页。maxRows 限制累计解码 Span 数，maxBytes 同时限制后端响应解码后的字节读取量及公共输出体积，timeoutMs 覆盖连接、读取、解码和归一化。任何一步超限均取消读取并整体报错；平台可中断 HTTP 读取，但只有后端提供明确依据时才声称其存储查询已终止。
+
+#### 5.9.4 协议解码、链路还原与质量
+
+HTTP 成功码不是整个流执行成功的充分条件。解码器按锁定协议读取 JSON 消息边界及 `result/error` 封装，检查最终读取结束状态，不假定一次 HTTP chunk 恰好对应一个 JSON 消息，也不把多块响应当成单个普通 JSON 对象。
+
+FindSpans 的解码入口为 `result.spans.resourceSpans`，GetTrace 为 `result.resourceSpans`，再遍历 scopeSpans/spans。保留 Resource、Scope 与 Span 属性各自归属，解析 AnyValue 类型和枚举，不把全部属性转成字符串；events、links、traceState、状态消息和后端警告随记录保留。返回链路可投影为第 4.9 节逻辑字段，但内部处理不能先丢掉还原身份、父子关系及质量依据所需信息。
+
+协议解码与逻辑转换的对应如下：
+
+| 数据 | 执行器解码 | 查询层归一化 |
+| --- | --- | --- |
+| Trace/Span 标识 | 按该 HTTP 协议中 bytes 的实际编码解码，校验长度；不混用 Protobuf JSON 的 base64 与 OTLP JSON 的十六进制约定 | 统一小写十六进制；Trace ID 使用 32 位表示，合法 64 位旧 ID 左补零；Span ID 16 位；空父 ID 表示根 |
+| 时间与耗时 | 保留 Unix 纳秒整数，不转浮点秒；缺失必需字段或结束早于开始时报告质量错误 | 输出带时区时间及 int64 纳秒耗时，依第 2.8.8 节规则转换 |
+| 服务及实例 | 从各自 Resource 属性取得原始身份，不能用当前搜索对象覆盖其他服务的身份 | 按 result_identity_mapping 还原 ObjectRef；找不到或歧义时保留原值与状态 |
+| 状态 | 按协议解码默认值及枚举，保留 status message | 归一为 UNSET/OK/ERROR；UNSET 不解释为业务成功，HTTP 5xx 不自动覆盖 Span 状态 |
+| 记录引用 | 返回源定位、traceId、spanId 等稳定键 | 生成绑定数据源范围和具体数据集的 RecordRef；同一 Span 在不同具体数据集视图中的引用可不同，底层身份仍由源范围+traceId+spanId 判等；不使用页码、排名或内存地址 |
+
+本项目将相同 `(traceId,spanId)` 的完全相同重复记录合并；内容冲突时保留冲突说明并标记质量不足，不任选一份冒充确定结果。按 parentSpanId 建父子边，links 独立保留，不能将 link 强行当父节点。缺失父节点只形成显式缺口，不补造 Span；异常环或自指关系标记为无效结构。
+
+统一质量包含 `executionComplete`、`truncated`、`observationCoverage`、requestedRange 和实际返回时间包络。Trace 另增加 `backendReadComplete`、`traceCompleteness=complete/partial/unknown`、`missingParentSpanIds` 和带依据的 warnings：
+
+- executionComplete 表示此次计划所有执行步骤完成；backendReadComplete 只表示所选端点在本次搜索范围内的返回流读取完毕，不能证明范围之外没有 Span。
+- 有缺失父节点、已知采集丢失或后端明确缺口时，traceCompleteness=partial。无结构缺口但缺乏采集覆盖证明时为 unknown，不能因为存在一个根节点就标 complete。
+- 采样、保留期和查询窗口造成的缺失须有证据才归因；否则只说明缺口未知。首版不承诺自动获得整条链路的采集完整性证明。
+
+例如 readTrace 成功后，公共 data 包含 traceId、spans（含 recordRef、原始身份及可解析的 objectRef），quality 与 provenance 按以下缩略结构返回；省略的公共请求标识、字段 Schema、各 Span 正文和模型修订仍须按第 4.9 节提供：
+
+```json
+{
+  "status": "ok",
+  "resultKind": "trace",
+  "data": {
+    "traceId": "0123456789abcdef0123456789abcdef",
+    "spans": [
+      {"spanId": "0000000000000001", "parentSpanId": null, "serviceName": "order-service", "instanceId": "order-01", "recordRef": "record-order-span-001"},
+      {"spanId": "0000000000000002", "parentSpanId": "0000000000000001", "serviceName": "inventory-service", "instanceId": "stock-02", "recordRef": "record-mall-stock-span-001"}
+    ]
+  },
+  "quality": {
+    "executionComplete": true,
+    "backendReadComplete": true,
+    "truncated": false,
+    "observationCoverage": "unknown",
+    "traceCompleteness": "unknown",
+    "missingParentSpanIds": [],
+    "warnings": ["已读取本次搜索范围内的后端响应；没有采集完整性证明"]
+  },
+  "provenance": {
+    "adapter": "jaeger-v3-http",
+    "operation": "GetTrace",
+    "rawTraces": true,
+    "accessScopeRef": "mall-prod-traces",
+    "executionRef": "trace-query-execution-002"
+  }
+}
+```
+
+search 返回 rows 时，RecordRef 同样稳定；局部 Span 搜索不要求返回父节点，不能因父节点未在当前页就报告整条 Trace 采集缺失。查询层将上述执行事实和字段映射封装为统一响应，Agent 再依据它决定是否继续取链路或日志。
+
+#### 5.9.5 错误、日志和验收依据
+
+错误复用第 4.9、5.7 节：请求参数/操作不支持在 validate/compile 阶段报告，认证失败为 AUTH_FAILED，连接失败为 DATA_SOURCE_UNAVAILABLE，超时/取消为 QUERY_TIMEOUT/QUERY_CANCELLED，流未完成为 INCOMPLETE_EXECUTION，格式或标识无法解码为 RESULT_DECODE_FAILED。预算超限使用 QUERY_BUDGET_EXCEEDED，失效游标使用 CURSOR_EXPIRED；中途收到后端 error 即使 HTTP 状态为 200 也必须失败。
+
+只对尚未消费结果、可确认安全重发的短暂网络错误或限流，在剩余 deadline 内有限重试；不拼接失败尝试的部分 Span。记录数据源、访问范围、绑定/能力版本、方法、脱敏参数、响应块/Span 数、实际时间与字节数、重试和错误。凭据和原始不透明游标不进入公开 explain；日志及证据正文沿用统一鉴权和脱敏策略。
+
+### 5.10 实现与验收
+
+#### 5.10.1 参考实现依据
 
 [Issue #95 的指定评论及同页讨论](https://github.com/alibaba/UnifiedModel/issues/95#issuecomment-5180272675)涉及运行时解析模型、字段映射及 Renderer。部分回复将其称为动态生成，另一些强调 generator 模板；相关回复带自动评估标记。以下结论由本地源码交叉核实，不把评论当作完整产品规范。
 
@@ -3320,6 +3598,24 @@ walkBindings 的结构化 nodeFilter/edgeFilter 使用第 5.3.2 节的编译规�
 | [Constraint](https://github.com/alibaba/UnifiedModel/blob/main/internal/query/constraints.go#L1) | 用独立于方言的约束描述过滤，供不同编译器使用；当前结构不等于支持任意复杂表达式 |
 
 参考实现是“元数据驱动的动态组合，并允许局部指标表达式”，不能概括成完整查询模板换变量，也不能概括成不需要任何语义声明就能自动推导任意查询。上述观测生成路径没有调用 LLM 编写语句。
+
+#### 5.10.2 Trace 端到端验收
+
+以下是待实现的验收要求，文档示例及版本锁定本身不表示测试已通过。使用隔离测试环境中的 Jaeger 2.23.0、目标 ES 版本和真实平台读写适配器；记录实际配置、功能开关及能力配置摘要。ES 版本和部署参数纳入验收产物后冻结，不能以“兼容 ES”替代实测。
+
+| 验收输入 | 必须验证的结果 |
+| --- | --- |
+| 写入带服务、实例、环境和父子关系的订单→库存→数据库 Span | 经平台写入→Jaeger→ES 后，search 能定位库存实例，readTrace 能读到同范围其他服务；写入确认与查询可见延迟分别记录 |
+| 同名属性分别位于 Resource、Span，另含缺失属性和不同实例 | 只按指定层级与同一 Span 的条件匹配；错误实例、环境和状态不能混入，缺少字段不变成默认匹配 |
+| 同时刻多个 Trace/Span，超过一页，并在续页期间写入新记录 | 验证排序、稳定区分键、后端 token、分页视图依据和失效处理；无法保证时只公开单页且标记无法续页 |
+| GetTrace 返回跨故障窗口 Span、缺失父节点、未采样分支或超出保留期数据 | 不按 search 窗口裁剪完整读取结果；已知缺口与未知覆盖分别报告，不推断缺失原因 |
+| 未授权完整范围、跨环境记录引用、篡改 traceId/游标 | 在规划/校验阶段拒绝；不得凭合法 traceId 绕过源记录和访问范围 |
+| 多个 HTTP 响应块、最后一块才含 token、HTTP 200 后续块报错 | 完整消费后才判定成功与续页；不把部分响应暴露为完整结果 |
+| 纳秒时间、64/128 位 Trace ID、枚举默认值、events/links 和重复冲突记录 | 保留精度与身份，验证真实响应编码，报告异常及质量；不混淆 links 和父子边 |
+| 超时、取消、超过 maxRows/maxBytes、后端不可用和认证失败 | 返回稳定错误及正确阶段，释放连接，不拼接部分结果，不生成误导性的成功证据 |
+| explain 与相同模型/能力版本下 execute | 计划中的方法、字段、范围和预算一致；explain 不发起目标 Trace 查询 |
+
+通过上述验收后，才可在能力注册表中开启对应绑定的 executeSupported；search、分页与 readTrace 分项记录，不能因为写入成功或某个接口返回 200 就整体宣称 Trace 接入完成。
 
 ## 6. Agent 层
 
